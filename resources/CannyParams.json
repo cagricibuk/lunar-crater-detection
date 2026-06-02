@@ -1,0 +1,23 @@
+{
+  "claheClipLimit": 0.70,
+  "claheTileSize": 12,
+  "topHatKernel": 137,
+  "morphKernel": 10,
+  "morphIters": 1,
+  "gaussKernel": 11,
+  "gaussSigma": 1.96,
+  "cannyT1": 10.00,
+  "cannyT2": 90.74,
+  "largeHoughMinDist": 102.07,
+  "largeHoughParam1": 138.68,
+  "largeHoughParam2": 39.18,
+  "largeHoughMinR": 39,
+  "largeHoughMaxR": 469,
+  "smallHoughMinDist": 27.91,
+  "smallHoughParam1": 49.20,
+  "smallHoughParam2": 30.63,
+  "smallHoughMinR": 15,
+  "smallHoughMaxR": 38,
+  "minArcLength": 10.00,
+  "circularity": 0.20
+}

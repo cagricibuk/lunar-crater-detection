@@ -1,0 +1,6 @@
+{
+  "claheClipLimit": 3.00,
+  "cannyT1": 30.00,
+  "cannyT2": 100.00,
+  "houghParam2": 40.00
+}
