@@ -25,16 +25,32 @@ public class EdgeDetector {
     private int    logKernel   = 9;    // Gaussian kernel size before Laplacian
     private double logSigma    = 2.0;
 
+    // Morphological Closing parameters
+    private int    morphCloseKernel = 5;
+    private int    morphCloseIters  = 1;
+
     /**
      * Detect edges in preprocessed (gray) Mat.
      * Returns binary edge Mat.
      */
     public Mat detect(Mat preprocessed) {
+        Mat edges;
         switch (mode) {
-            case LOG:   return detectLoG(preprocessed);
+            case LOG:   edges = detectLoG(preprocessed); break;
             case CANNY: // fall-through default
-            default:    return detectCanny(preprocessed);
+            default:    edges = detectCanny(preprocessed); break;
         }
+
+        // Apply Morphological Closing to connect broken edges (e.g., incomplete circles)
+        Mat closedEdges = new Mat();
+        int k = (morphCloseKernel % 2 == 0) ? morphCloseKernel + 1 : morphCloseKernel;
+        Mat element = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, new Size(k, k));
+        Imgproc.morphologyEx(edges, closedEdges, Imgproc.MORPH_CLOSE, element, new Point(-1, -1), morphCloseIters);
+        
+        edges.release();
+        element.release();
+
+        return closedEdges;
     }
 
     public Mat detectCanny(Mat gray) {
@@ -73,6 +89,8 @@ public class EdgeDetector {
     public void setApertureSize(int v)    { this.apertureSize = v; }
     public void setLogKernel(int v)       { this.logKernel   = v; }
     public void setLogSigma(double v)     { this.logSigma    = v; }
+    public void setMorphCloseKernel(int v){ this.morphCloseKernel = (v % 2 == 0) ? v + 1 : v; }
+    public void setMorphCloseIters(int v) { this.morphCloseIters = v; }
 
     // --- getters ---
     public Mode   getMode()         { return mode; }
@@ -81,4 +99,6 @@ public class EdgeDetector {
     public int    getApertureSize() { return apertureSize; }
     public int    getLogKernel()    { return logKernel; }
     public double getLogSigma()     { return logSigma; }
+    public int    getMorphCloseKernel() { return morphCloseKernel; }
+    public int    getMorphCloseIters()  { return morphCloseIters; }
 }

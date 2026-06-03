@@ -19,6 +19,7 @@ import org.opencv.core.*;
 
 import pipeline.CraterPipeline;
 import pipeline.PipelineResult;
+import pipeline.TRNDebugContext;
 import algorithms.EdgeDetector;
 
 import java.io.File;
@@ -59,13 +60,19 @@ public class MainWindow extends Application {
 
     // Current loaded image path
     private String currentImagePath = null;
+    
+    private String trnBaseMapPath = null;
+    private String trnTemplatePath = null;
 
     // --- Parameter sliders (bound to pipeline) ---
     private Slider sClipLimit, sTileSize, sTopHatKernel, sMorphKernel, sMorphIters, sGaussKernel, sGaussSigma;
     private Slider sCannyT1, sCannyT2;
+    private Slider sMorphCloseKernel, sMorphCloseIters;
+    private Slider sKMeansK, sKMeansIters;
+    private CheckBox cbKMeansEnabled;
     private Slider sLargeHoughMinDist, sLargeHoughParam1, sLargeHoughParam2, sLargeHoughMinR, sLargeHoughMaxR;
     private Slider sSmallHoughMinDist, sSmallHoughParam1, sSmallHoughParam2, sSmallHoughMinR, sSmallHoughMaxR;
-    private Slider sCircularity, sMinArcLength;
+    private Slider sCircularity, sMinArcLength, sQuadrantRatio;
     private ToggleGroup edgeModeGroup;
 
     private final ProgressBar progressBar = new ProgressBar(0);
@@ -149,11 +156,19 @@ public class MainWindow extends Application {
             pipeline.getEdgeDetector().setMode(m);
             loadSettings(m);
         });
-        panel.getChildren().addAll(rbCanny, rbLoG, new Separator());
+        
+        panel.getChildren().addAll(rbCanny, rbLoG);
+        
+        sMorphCloseKernel = addSliderInt(panel, "Closing Kernel", 1, 31, 5,
+            v -> pipeline.getEdgeDetector().setMorphCloseKernel(v));
+        sMorphCloseIters = addSliderInt(panel, "Closing Iterations", 0, 10, 1,
+            v -> pipeline.getEdgeDetector().setMorphCloseIters(v));
+            
+        panel.getChildren().add(new Separator());
 
         // --- Preprocessing ---
         panel.getChildren().add(sectionLabel("Preprocessing"));
-        sClipLimit   = addSlider(panel, "CLAHE Clip Limit",  0.5, 8.0, 2.0,
+        sClipLimit   = addSlider(panel, "CLAHE Clip Limit",  0.5, 16.0, 2.0,
             v -> pipeline.getPreprocessor().setClipLimit(v));
         sTileSize    = addSliderInt(panel, "CLAHE Tile Size",    4, 16,  8,
             v -> pipeline.getPreprocessor().setTileSize(v));
@@ -167,6 +182,20 @@ public class MainWindow extends Application {
             v -> pipeline.getPreprocessor().setGaussKernel(v));
         sGaussSigma  = addSlider(panel, "Gauss Sigma",       0.5, 15.0, 1.5,
             v -> pipeline.getPreprocessor().setGaussSigma(v));
+        panel.getChildren().add(new Separator());
+
+        // --- K-Means Segmentation ---
+        panel.getChildren().add(sectionLabel("K-Means Segmentation"));
+        cbKMeansEnabled = new CheckBox("Enabled");
+        cbKMeansEnabled.setSelected(true);
+        cbKMeansEnabled.setStyle("-fx-text-fill: #c9d1d9; -fx-font-family: monospace; -fx-font-size: 12;");
+        cbKMeansEnabled.selectedProperty().addListener((o, ov, nv) ->
+            pipeline.getKmeansSegmenter().setEnabled(nv));
+        panel.getChildren().add(cbKMeansEnabled);
+        sKMeansK = addSliderInt(panel, "K (Clusters)",  2, 5, 3,
+            v -> pipeline.getKmeansSegmenter().setK(v));
+        sKMeansIters = addSliderInt(panel, "Max Iterations", 5, 50, 20,
+            v -> pipeline.getKmeansSegmenter().setMaxIterations(v));
         panel.getChildren().add(new Separator());
 
         // --- Canny ---
@@ -215,6 +244,53 @@ public class MainWindow extends Application {
         panel.getChildren().add(sectionLabel("Region Filter"));
         sCircularity  = addSlider(panel, "Min Circularity", 0.0, 1.0, 0.15,
             v -> pipeline.getRegionFilter().setMinCircularity(v));
+        sQuadrantRatio = addSlider(panel, "Max Quadrant Ratio", 1.5, 10.0, 3.0,
+            v -> pipeline.getRegionFilter().setMaxQuadrantRatio(v));
+
+        // --- Find on Map (TRN) ---
+        panel.getChildren().add(sectionLabel("Find on Map (TRN)"));
+        Button btnSelectBaseMap = styledButton("Select Base Map (50km)", "#21262d");
+        btnSelectBaseMap.setMaxWidth(Double.MAX_VALUE);
+        Button btnSelectTemplate = styledButton("Select Template (5km)", "#21262d");
+        btnSelectTemplate.setMaxWidth(Double.MAX_VALUE);
+        
+        Label lblBaseMap = new Label("No base map");
+        lblBaseMap.setTextFill(Color.web("#8b949e"));
+        lblBaseMap.setFont(Font.font("Monospaced", 10));
+        
+        Label lblTemplate = new Label("No template");
+        lblTemplate.setTextFill(Color.web("#8b949e"));
+        lblTemplate.setFont(Font.font("Monospaced", 10));
+
+        btnSelectBaseMap.setOnAction(e -> {
+            File f = chooseImage("Select Base Map");
+            if (f != null) {
+                trnBaseMapPath = f.getAbsolutePath();
+                lblBaseMap.setText(f.getName());
+            }
+        });
+        
+        btnSelectTemplate.setOnAction(e -> {
+            File f = chooseImage("Select Template");
+            if (f != null) {
+                trnTemplatePath = f.getAbsolutePath();
+                lblTemplate.setText(f.getName());
+            }
+        });
+        
+        Slider sTrnScale = addSlider(panel, "Scale Factor", 0.01, 1.0, 0.1, v -> {});
+        
+        Button btnRunTRN = styledButton("🎯 Run TRN Matching", "#8957e5");
+        btnRunTRN.setMaxWidth(Double.MAX_VALUE);
+        btnRunTRN.setOnAction(e -> runTRN(sTrnScale.getValue()));
+        
+        panel.getChildren().addAll(btnSelectBaseMap, lblBaseMap, btnSelectTemplate, lblTemplate, btnRunTRN);
+        panel.getChildren().add(new Separator());
+
+        // auto threshold button
+        Button btnAutoThresh = styledButton("🪄 Auto Threshold (Otsu)", "#0277bd");
+        btnAutoThresh.setMaxWidth(Double.MAX_VALUE);
+        btnAutoThresh.setOnAction(e -> applyAutoThreshold());
 
         // reset button
         Button btnReset = styledButton("↺ Reset Defaults", "#30363d");
@@ -226,7 +302,7 @@ public class MainWindow extends Application {
         btnSave.setMaxWidth(Double.MAX_VALUE);
         btnSave.setOnAction(e -> saveSettings(pipeline.getEdgeDetector().getMode()));
 
-        panel.getChildren().addAll(new Separator(), btnReset, btnSave);
+        panel.getChildren().addAll(new Separator(), btnAutoThresh, btnReset, btnSave);
 
         ScrollPane sp = new ScrollPane(panel);
         sp.setFitToWidth(true);
@@ -253,7 +329,7 @@ public class MainWindow extends Application {
         grid.getRowConstraints().addAll(rc1, rc2);
 
         grid.add(imagePanel("Original",     ivOriginal),     0, 0);
-        grid.add(imagePanel("Preprocessed (CLAHE + Gaussian)", ivPreprocessed), 1, 0);
+        grid.add(imagePanel("Preprocessed + K-Means Mask", ivPreprocessed), 1, 0);
         grid.add(imagePanel("Edge Detection",                  ivEdges),        0, 1);
         grid.add(imagePanel("Detected Craters",                ivDetected),     1, 1);
 
@@ -322,6 +398,50 @@ public class MainWindow extends Application {
         // Show original immediately
         Mat mat = org.opencv.imgcodecs.Imgcodecs.imread(currentImagePath);
         if (!mat.empty()) setImageView(ivOriginal, mat);
+    }
+
+    private void applyAutoThreshold() {
+        if (currentImagePath == null) {
+            statusLabel.setText("⚠ Load an image first!");
+            statusLabel.setTextFill(Color.web("#e3b341"));
+            return;
+        }
+
+        // Load image in grayscale
+        Mat gray = org.opencv.imgcodecs.Imgcodecs.imread(currentImagePath, org.opencv.imgcodecs.Imgcodecs.IMREAD_GRAYSCALE);
+        if (gray.empty()) return;
+
+        // Apply a light blur to reduce noise before Otsu calculation
+        Mat blurred = new Mat();
+        org.opencv.imgproc.Imgproc.GaussianBlur(gray, blurred, new Size(5, 5), 1.5);
+
+        // Calculate Otsu's threshold
+        Mat temp = new Mat();
+        double otsuThresh = org.opencv.imgproc.Imgproc.threshold(blurred, temp, 0, 255,
+            org.opencv.imgproc.Imgproc.THRESH_BINARY | org.opencv.imgproc.Imgproc.THRESH_OTSU);
+
+        // Optimal parameters based on Otsu
+        double t2 = otsuThresh;
+        double t1 = otsuThresh * 0.5;
+
+        // Ensure within valid bounds
+        t2 = Math.min(400, Math.max(20, t2));
+        t1 = Math.min(200, Math.max(5, t1));
+
+        // Update UI Sliders
+        sCannyT1.setValue(t1);
+        sCannyT2.setValue(t2);
+        sLargeHoughParam1.setValue(t2);
+        sSmallHoughParam1.setValue(t2 * 0.8); // Slightly lower for small craters
+
+        logArea.appendText(String.format("Auto Threshold (Otsu) calculated: %.1f\n", otsuThresh));
+        logArea.appendText(String.format(" -> Canny T1: %.1f, Canny T2: %.1f, L-Hough P1: %.1f, S-Hough P1: %.1f\n", t1, t2, t2, t2 * 0.8));
+        statusLabel.setText("Auto threshold complete. Run detection.");
+        statusLabel.setTextFill(Color.web("#3fb950"));
+
+        gray.release();
+        blurred.release();
+        temp.release();
     }
 
     private void runPipeline() {
@@ -403,6 +523,8 @@ public class MainWindow extends Application {
         sMorphKernel.setValue(3); sMorphIters.setValue(1);
         sGaussKernel.setValue(5); sGaussSigma.setValue(1.5);
         sCannyT1.setValue(50);    sCannyT2.setValue(150);
+        sMorphCloseKernel.setValue(5); sMorphCloseIters.setValue(1);
+        cbKMeansEnabled.setSelected(true); sKMeansK.setValue(3); sKMeansIters.setValue(20);
         
         sLargeHoughMinDist.setValue(100); sLargeHoughParam1.setValue(100); sLargeHoughParam2.setValue(60);
         sLargeHoughMinR.setValue(80);     sLargeHoughMaxR.setValue(400);
@@ -411,6 +533,7 @@ public class MainWindow extends Application {
         sSmallHoughMinR.setValue(15);     sSmallHoughMaxR.setValue(80);
         sMinArcLength.setValue(30.0);
         sCircularity.setValue(0.15);
+        sQuadrantRatio.setValue(3.0);
     }
 
     private void saveSettings(EdgeDetector.Mode mode) {
@@ -419,14 +542,18 @@ public class MainWindow extends Application {
             String json = String.format("{\n" +
                 "  \"claheClipLimit\": %.2f,\n  \"claheTileSize\": %d,\n  \"topHatKernel\": %d,\n  \"morphKernel\": %d,\n  \"morphIters\": %d,\n  \"gaussKernel\": %d,\n  \"gaussSigma\": %.2f,\n" +
                 "  \"cannyT1\": %.2f,\n  \"cannyT2\": %.2f,\n" +
+                "  \"morphCloseKernel\": %d,\n  \"morphCloseIters\": %d,\n" +
+                "  \"kmeansEnabled\": %s,\n  \"kmeansK\": %d,\n  \"kmeansMaxIters\": %d,\n" +
                 "  \"largeHoughMinDist\": %.2f,\n  \"largeHoughParam1\": %.2f,\n  \"largeHoughParam2\": %.2f,\n  \"largeHoughMinR\": %d,\n  \"largeHoughMaxR\": %d,\n" +
                 "  \"smallHoughMinDist\": %.2f,\n  \"smallHoughParam1\": %.2f,\n  \"smallHoughParam2\": %.2f,\n  \"smallHoughMinR\": %d,\n  \"smallHoughMaxR\": %d,\n" +
-                "  \"minArcLength\": %.2f,\n  \"circularity\": %.2f\n}", 
+                "  \"minArcLength\": %.2f,\n  \"circularity\": %.2f,\n  \"quadrantRatio\": %.2f\n}", 
                 sClipLimit.getValue(), (int)sTileSize.getValue(), (int)sTopHatKernel.getValue(), (int)sMorphKernel.getValue(), (int)sMorphIters.getValue(), (int)sGaussKernel.getValue(), sGaussSigma.getValue(),
                 sCannyT1.getValue(), sCannyT2.getValue(), 
+                (int)sMorphCloseKernel.getValue(), (int)sMorphCloseIters.getValue(),
+                cbKMeansEnabled.isSelected(), (int)sKMeansK.getValue(), (int)sKMeansIters.getValue(),
                 sLargeHoughMinDist.getValue(), sLargeHoughParam1.getValue(), sLargeHoughParam2.getValue(), (int)sLargeHoughMinR.getValue(), (int)sLargeHoughMaxR.getValue(),
                 sSmallHoughMinDist.getValue(), sSmallHoughParam1.getValue(), sSmallHoughParam2.getValue(), (int)sSmallHoughMinR.getValue(), (int)sSmallHoughMaxR.getValue(),
-                sMinArcLength.getValue(), sCircularity.getValue()
+                sMinArcLength.getValue(), sCircularity.getValue(), sQuadrantRatio.getValue()
             );
             Files.writeString(new File(file).toPath(), json);
             statusLabel.setText("✓ Saved " + mode + " settings.");
@@ -456,6 +583,13 @@ public class MainWindow extends Application {
             doubleVal(content, "gaussSigma", sGaussSigma::setValue);
             doubleVal(content, "cannyT1", sCannyT1::setValue);
             doubleVal(content, "cannyT2", sCannyT2::setValue);
+            intVal(content, "morphCloseKernel", v -> sMorphCloseKernel.setValue(v));
+            intVal(content, "morphCloseIters", v -> sMorphCloseIters.setValue(v));
+            
+            // K-Means params
+            boolVal(content, "kmeansEnabled", v -> cbKMeansEnabled.setSelected(v));
+            intVal(content, "kmeansK", v -> sKMeansK.setValue(v));
+            intVal(content, "kmeansMaxIters", v -> sKMeansIters.setValue(v));
             
             // New large params
             doubleVal(content, "largeHoughMinDist", sLargeHoughMinDist::setValue);
@@ -478,6 +612,7 @@ public class MainWindow extends Application {
             intVal(content, "houghMaxR", v -> sLargeHoughMaxR.setValue(v));
             doubleVal(content, "minArcLength", sMinArcLength::setValue);
             doubleVal(content, "circularity", sCircularity::setValue);
+            doubleVal(content, "quadrantRatio", sQuadrantRatio::setValue);
 
             statusLabel.setText("✓ Loaded " + mode + " settings.");
             statusLabel.setTextFill(Color.web("#3fb950"));
@@ -498,6 +633,101 @@ public class MainWindow extends Application {
         Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*([0-9.]+)").matcher(content);
         if (m.find()) setter.accept((int)Double.parseDouble(m.group(1)));
     }
+
+    private void boolVal(String content, String key, java.util.function.Consumer<Boolean> setter) {
+        Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*(true|false)").matcher(content);
+        if (m.find()) setter.accept(Boolean.parseBoolean(m.group(1)));
+    }
+
+    // ------------------------------------------------------------------ Actions (TRN)
+
+    private File chooseImage(String title) {
+        FileChooser fc = new FileChooser();
+        fc.setTitle(title);
+        fc.getExtensionFilters().addAll(
+            new FileChooser.ExtensionFilter("Image Files", "*.png","*.jpg","*.jpeg","*.tif","*.tiff","*.bmp")
+        );
+        return fc.showOpenDialog(null);
+    }
+
+    private void runTRN(double scaleFactor) {
+        if (trnBaseMapPath == null || trnTemplatePath == null) {
+            statusLabel.setText("⚠ TRN: Please select both Base Map and Template.");
+            statusLabel.setTextFill(Color.web("#e3b341"));
+            return;
+        }
+        
+        statusLabel.setText("⏳ Running TRN Geometric Constellation Matching...");
+        statusLabel.setTextFill(Color.web("#e3b341"));
+        progressBar.setProgress(-1); // Indeterminate
+        progressBar.setVisible(true);
+        
+        Task<TRNDebugContext> task = new Task<>() {
+            @Override
+            protected TRNDebugContext call() throws Exception {
+                long t0 = System.currentTimeMillis();
+
+                // Load images
+                java.awt.image.BufferedImage mapImg = javax.imageio.ImageIO.read(new File(trnBaseMapPath));
+                java.awt.image.BufferedImage tempImg = javax.imageio.ImageIO.read(new File(trnTemplatePath));
+
+                // Prepare Debug Context
+                TRNDebugContext ctx = new TRNDebugContext();
+                ctx.mapImage = mapImg;
+                ctx.templateImage = tempImg;
+                ctx.expectedScale = scaleFactor;
+
+                // Execute Soft Edge ZNCC Matching
+                algorithms.TemplateMatcher.MatchResult matchRes = algorithms.TemplateMatcher.matchWithScaleSweep(
+                    mapImg, tempImg, scaleFactor, ctx);
+
+                ctx.executionTimeMs = System.currentTimeMillis() - t0;
+                
+                return ctx;
+            }
+        };
+
+        task.setOnSucceeded(e -> {
+            progressBar.setVisible(false);
+            progressBar.setProgress(0);
+            TRNDebugContext ctx = task.getValue();
+            algorithms.TemplateMatcher.MatchResult res = ctx.finalMatch;
+            
+            if (res != null) {
+                String info = String.format(" | Ölçek: %.3f | Skor: %.3f", res.optimalScale, res.score);
+                if (res.score >= 0.70) {
+                    statusLabel.setText(String.format("✓ Yüksek Doğrulukla Tespit Edildi (Skor: %.3f)%s", res.score, info));
+                    statusLabel.setTextFill(Color.web("#3fb950"));
+                } else if (res.score >= 0.50) {
+                    statusLabel.setText(String.format("⚠ Olası Eşleşme Bulundu (Skor: %.3f)%s", res.score, info));
+                    statusLabel.setTextFill(Color.web("#e3b341"));
+                } else {
+                    statusLabel.setText(String.format("✗ Düşük Güven (Skor: %.3f)%s", res.score, info));
+                    statusLabel.setTextFill(Color.web("#f85149"));
+                }
+                logArea.appendText(String.format("TRN ZNCC -> X:%d Y:%d (Score: %.3f, Scale: %.3f)\n",
+                    res.x, res.y, res.score, res.optimalScale));
+            } else {
+                statusLabel.setText("✗ Eşleşme Bulunamadı (ZNCC skoru çok düşük)");
+                statusLabel.setTextFill(Color.web("#f85149"));
+            }
+
+            // Show the new Engineering Diagnostic Panel
+            new TRNDiagnosticWindow(ctx).show();
+        });
+        
+        task.setOnFailed(e -> {
+            progressBar.setVisible(false);
+            progressBar.setProgress(0);
+            statusLabel.setText("✗ TRN Error: " + task.getException().getMessage());
+            statusLabel.setTextFill(Color.web("#f85149"));
+            task.getException().printStackTrace();
+        });
+        
+        new Thread(task, "trn-thread").start();
+    }
+    
+    // Old showTRNResult removed, using TRNDiagnosticWindow instead.
 
     // ------------------------------------------------------------------ Helpers
 
