@@ -19,8 +19,6 @@ import org.opencv.core.*;
 
 import pipeline.CraterPipeline;
 import pipeline.PipelineResult;
-import pipeline.TRNDebugContext;
-import algorithms.EdgeDetector;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -47,6 +45,7 @@ public class MainWindow extends Application {
     static { System.loadLibrary(Core.NATIVE_LIBRARY_NAME); }
 
     private final CraterPipeline pipeline = new CraterPipeline();
+    private PipelineResult lastResult;
 
     // Image views for the 4 panels
     private final ImageView ivOriginal     = makeImageView();
@@ -61,19 +60,14 @@ public class MainWindow extends Application {
     // Current loaded image path
     private String currentImagePath = null;
     
-    private String trnBaseMapPath = null;
-    private String trnTemplatePath = null;
-
     // --- Parameter sliders (bound to pipeline) ---
     private Slider sClipLimit, sTileSize, sTopHatKernel, sMorphKernel, sMorphIters, sGaussKernel, sGaussSigma;
     private Slider sCannyT1, sCannyT2;
     private Slider sMorphCloseKernel, sMorphCloseIters;
-    private Slider sKMeansK, sKMeansIters;
-    private CheckBox cbKMeansEnabled;
     private Slider sLargeHoughMinDist, sLargeHoughParam1, sLargeHoughParam2, sLargeHoughMinR, sLargeHoughMaxR;
     private Slider sSmallHoughMinDist, sSmallHoughParam1, sSmallHoughParam2, sSmallHoughMinR, sSmallHoughMaxR;
     private Slider sCircularity, sMinArcLength, sQuadrantRatio;
-    private ToggleGroup edgeModeGroup;
+    private ToggleButton tbtnAdvanced;
 
     private final ProgressBar progressBar = new ProgressBar(0);
     private final Label timerLabel = new Label("00:00.000");
@@ -103,8 +97,8 @@ public class MainWindow extends Application {
         stage.setMinHeight(700);
         stage.show();
         
-        // Load default mode settings
-        loadSettings(EdgeDetector.Mode.CANNY);
+        // Load default settings
+        loadSettings();
     }
 
     // ------------------------------------------------------------------ UI builders
@@ -143,149 +137,94 @@ public class MainWindow extends Application {
         panel.setPrefWidth(240);
         panel.setStyle("-fx-background-color: #161b22;");
 
-        // --- Edge mode ---
-        panel.getChildren().add(sectionLabel("Edge Detector"));
-        edgeModeGroup = new ToggleGroup();
-        RadioButton rbCanny = new RadioButton("Canny");
-        RadioButton rbLoG   = new RadioButton("LoG");
-        rbCanny.setToggleGroup(edgeModeGroup); rbCanny.setSelected(true);
-        rbLoG.setToggleGroup(edgeModeGroup);
-        styleRadio(rbCanny); styleRadio(rbLoG);
-        edgeModeGroup.selectedToggleProperty().addListener((o, ov, nv) -> {
-            EdgeDetector.Mode m = nv == rbCanny ? EdgeDetector.Mode.CANNY : EdgeDetector.Mode.LOG;
-            pipeline.getEdgeDetector().setMode(m);
-            loadSettings(m);
+        tbtnAdvanced = new ToggleButton("⚙ Gelişmiş Ayarlar (Advanced Mode)");
+        tbtnAdvanced.setMaxWidth(Double.MAX_VALUE);
+        tbtnAdvanced.setStyle("-fx-base: #21262d; -fx-text-fill: #c9d1d9; -fx-font-family: monospace; -fx-cursor: hand;");
+
+        VBox advancedVBox = new VBox(8);
+        advancedVBox.setVisible(false);
+        advancedVBox.setManaged(false);
+
+        tbtnAdvanced.selectedProperty().addListener((o, ov, nv) -> {
+            advancedVBox.setVisible(nv);
+            advancedVBox.setManaged(nv);
         });
-        
-        panel.getChildren().addAll(rbCanny, rbLoG);
-        
-        sMorphCloseKernel = addSliderInt(panel, "Closing Kernel", 1, 31, 5,
+
+        panel.getChildren().add(tbtnAdvanced);
+
+        sMorphCloseKernel = addSliderInt(advancedVBox, "Closing Kernel", 1, 31, 5,
             v -> pipeline.getEdgeDetector().setMorphCloseKernel(v));
-        sMorphCloseIters = addSliderInt(panel, "Closing Iterations", 0, 10, 1,
+        sMorphCloseIters = addSliderInt(advancedVBox, "Closing Iterations", 0, 10, 1,
             v -> pipeline.getEdgeDetector().setMorphCloseIters(v));
             
-        panel.getChildren().add(new Separator());
+        advancedVBox.getChildren().add(new Separator());
 
         // --- Preprocessing ---
-        panel.getChildren().add(sectionLabel("Preprocessing"));
-        sClipLimit   = addSlider(panel, "CLAHE Clip Limit",  0.5, 16.0, 2.0,
+        advancedVBox.getChildren().add(sectionLabel("Preprocessing"));
+        sClipLimit   = addSlider(advancedVBox, "CLAHE Clip Limit",  0.5, 16.0, 2.0,
             v -> pipeline.getPreprocessor().setClipLimit(v));
-        sTileSize    = addSliderInt(panel, "CLAHE Tile Size",    4, 16,  8,
+        sTileSize    = addSliderInt(advancedVBox, "CLAHE Tile Size",    4, 16,  8,
             v -> pipeline.getPreprocessor().setTileSize(v));
-        sTopHatKernel = addSliderInt(panel, "Top-Hat Kernel",    3, 151, 15,
+        sTopHatKernel = addSliderInt(advancedVBox, "Top-Hat Kernel",    3, 151, 15,
             v -> pipeline.getPreprocessor().setTopHatKernel(v));
-        sMorphKernel = addSliderInt(panel, "Morph Kernel",       1, 15,  3,
+        sMorphKernel = addSliderInt(advancedVBox, "Morph Kernel",       1, 15,  3,
             v -> pipeline.getPreprocessor().setMorphKernel(v));
-        sMorphIters  = addSliderInt(panel, "Morph Iterations",   1, 10,  1,
+        sMorphIters  = addSliderInt(advancedVBox, "Morph Iterations",   1, 10,  1,
             v -> pipeline.getPreprocessor().setMorphIterations(v));
-        sGaussKernel = addSliderInt(panel, "Gauss Kernel",       3, 51,  5,
+        sGaussKernel = addSliderInt(advancedVBox, "Gauss Kernel",       3, 51,  5,
             v -> pipeline.getPreprocessor().setGaussKernel(v));
-        sGaussSigma  = addSlider(panel, "Gauss Sigma",       0.5, 15.0, 1.5,
+        sGaussSigma  = addSlider(advancedVBox, "Gauss Sigma",       0.5, 15.0, 1.5,
             v -> pipeline.getPreprocessor().setGaussSigma(v));
         panel.getChildren().add(new Separator());
 
-        // --- K-Means Segmentation ---
-        panel.getChildren().add(sectionLabel("K-Means Segmentation"));
-        cbKMeansEnabled = new CheckBox("Enabled");
-        cbKMeansEnabled.setSelected(true);
-        cbKMeansEnabled.setStyle("-fx-text-fill: #c9d1d9; -fx-font-family: monospace; -fx-font-size: 12;");
-        cbKMeansEnabled.selectedProperty().addListener((o, ov, nv) ->
-            pipeline.getKmeansSegmenter().setEnabled(nv));
-        panel.getChildren().add(cbKMeansEnabled);
-        sKMeansK = addSliderInt(panel, "K (Clusters)",  2, 5, 3,
-            v -> pipeline.getKmeansSegmenter().setK(v));
-        sKMeansIters = addSliderInt(panel, "Max Iterations", 5, 50, 20,
-            v -> pipeline.getKmeansSegmenter().setMaxIterations(v));
-        panel.getChildren().add(new Separator());
-
         // --- Canny ---
-        panel.getChildren().add(sectionLabel("Canny Parameters"));
-        sCannyT1 = addSlider(panel, "Threshold 1",  10, 200,  50,
+        advancedVBox.getChildren().add(sectionLabel("Canny Parameters"));
+        sCannyT1 = addSlider(advancedVBox, "Threshold 1",  10, 200,  50,
             v -> pipeline.getEdgeDetector().setThreshold1(v));
-        sCannyT2 = addSlider(panel, "Threshold 2",  50, 400, 150,
+        sCannyT2 = addSlider(advancedVBox, "Threshold 2",  50, 400, 150,
             v -> pipeline.getEdgeDetector().setThreshold2(v));
         panel.getChildren().add(new Separator());
 
         // --- Hough (Large) ---
-        panel.getChildren().add(sectionLabel("Hough: Large Craters"));
-        sLargeHoughMinDist = addSlider(panel, "Min Distance",   5, 400, 100,
+        advancedVBox.getChildren().add(sectionLabel("Hough: Large Craters"));
+        sLargeHoughMinDist = addSlider(advancedVBox, "Min Distance",   5, 400, 100,
             v -> pipeline.getLargeHoughDetector().setMinDist(v));
-        sLargeHoughParam1  = addSlider(panel, "Canny Param1", 10, 200, 100,
+        sLargeHoughParam1  = addSlider(advancedVBox, "Canny Param1", 10, 200, 100,
             v -> pipeline.getLargeHoughDetector().setParam1(v));
-        sLargeHoughParam2  = addSlider(panel, "Accumulator Th.", 5, 100, 60,
+        sLargeHoughParam2  = addSlider(advancedVBox, "Accumulator Th.", 5, 100, 60,
             v -> pipeline.getLargeHoughDetector().setParam2(v));
-        sLargeHoughMinR    = addSliderInt(panel, "Min Radius",  3, 300, 80,
+        sLargeHoughMinR    = addSliderInt(advancedVBox, "Min Radius",  3, 300, 80,
             v -> pipeline.getLargeHoughDetector().setMinRadius(v));
-        sLargeHoughMaxR    = addSliderInt(panel, "Max Radius",  20, 800, 400,
+        sLargeHoughMaxR    = addSliderInt(advancedVBox, "Max Radius",  20, 800, 400,
             v -> pipeline.getLargeHoughDetector().setMaxRadius(v));
         panel.getChildren().add(new Separator());
 
         // --- Hough (Small) ---
-        panel.getChildren().add(sectionLabel("Hough: Small Craters"));
-        sSmallHoughMinDist = addSlider(panel, "Min Distance",   5, 400, 30,
+        advancedVBox.getChildren().add(sectionLabel("Hough: Small Craters"));
+        sSmallHoughMinDist = addSlider(advancedVBox, "Min Distance",   5, 400, 30,
             v -> pipeline.getSmallHoughDetector().setMinDist(v));
-        sSmallHoughParam1  = addSlider(panel, "Canny Param1", 10, 200, 80,
+        sSmallHoughParam1  = addSlider(advancedVBox, "Canny Param1", 10, 200, 80,
             v -> pipeline.getSmallHoughDetector().setParam1(v));
-        sSmallHoughParam2  = addSlider(panel, "Accumulator Th.", 5, 100, 35,
+        sSmallHoughParam2  = addSlider(advancedVBox, "Accumulator Th.", 5, 100, 35,
             v -> pipeline.getSmallHoughDetector().setParam2(v));
-        sSmallHoughMinR    = addSliderInt(panel, "Min Radius",  3, 300, 15,
+        sSmallHoughMinR    = addSliderInt(advancedVBox, "Min Radius",  3, 300, 15,
             v -> pipeline.getSmallHoughDetector().setMinRadius(v));
-        sSmallHoughMaxR    = addSliderInt(panel, "Max Radius",  20, 800, 80,
+        sSmallHoughMaxR    = addSliderInt(advancedVBox, "Max Radius",  20, 800, 80,
             v -> pipeline.getSmallHoughDetector().setMaxRadius(v));
-        panel.getChildren().add(new Separator());
+        advancedVBox.getChildren().add(new Separator());
 
         // --- Ellipse ---
-        panel.getChildren().add(sectionLabel("Ellipse Detector"));
-        sMinArcLength = addSlider(panel, "Min Arc Length", 10.0, 200.0, 30.0,
+        advancedVBox.getChildren().add(sectionLabel("Ellipse Detector"));
+        sMinArcLength = addSlider(advancedVBox, "Min Arc Length", 10.0, 200.0, 30.0,
             v -> pipeline.getEllipseDetector().setMinArcLength(v));
-        panel.getChildren().add(new Separator());
+        advancedVBox.getChildren().add(new Separator());
 
         // --- Region filter ---
-        panel.getChildren().add(sectionLabel("Region Filter"));
-        sCircularity  = addSlider(panel, "Min Circularity", 0.0, 1.0, 0.15,
+        advancedVBox.getChildren().add(sectionLabel("Region Filter"));
+        sCircularity  = addSlider(advancedVBox, "Min Circularity", 0.0, 1.0, 0.15,
             v -> pipeline.getRegionFilter().setMinCircularity(v));
-        sQuadrantRatio = addSlider(panel, "Max Quadrant Ratio", 1.5, 10.0, 3.0,
+        sQuadrantRatio = addSlider(advancedVBox, "Max Quadrant Ratio", 1.5, 10.0, 3.0,
             v -> pipeline.getRegionFilter().setMaxQuadrantRatio(v));
-
-        // --- Find on Map (TRN) ---
-        panel.getChildren().add(sectionLabel("Find on Map (TRN)"));
-        Button btnSelectBaseMap = styledButton("Select Base Map (50km)", "#21262d");
-        btnSelectBaseMap.setMaxWidth(Double.MAX_VALUE);
-        Button btnSelectTemplate = styledButton("Select Template (5km)", "#21262d");
-        btnSelectTemplate.setMaxWidth(Double.MAX_VALUE);
-        
-        Label lblBaseMap = new Label("No base map");
-        lblBaseMap.setTextFill(Color.web("#8b949e"));
-        lblBaseMap.setFont(Font.font("Monospaced", 10));
-        
-        Label lblTemplate = new Label("No template");
-        lblTemplate.setTextFill(Color.web("#8b949e"));
-        lblTemplate.setFont(Font.font("Monospaced", 10));
-
-        btnSelectBaseMap.setOnAction(e -> {
-            File f = chooseImage("Select Base Map");
-            if (f != null) {
-                trnBaseMapPath = f.getAbsolutePath();
-                lblBaseMap.setText(f.getName());
-            }
-        });
-        
-        btnSelectTemplate.setOnAction(e -> {
-            File f = chooseImage("Select Template");
-            if (f != null) {
-                trnTemplatePath = f.getAbsolutePath();
-                lblTemplate.setText(f.getName());
-            }
-        });
-        
-        Slider sTrnScale = addSlider(panel, "Scale Factor", 0.01, 1.0, 0.1, v -> {});
-        
-        Button btnRunTRN = styledButton("🎯 Run TRN Matching", "#8957e5");
-        btnRunTRN.setMaxWidth(Double.MAX_VALUE);
-        btnRunTRN.setOnAction(e -> runTRN(sTrnScale.getValue()));
-        
-        panel.getChildren().addAll(btnSelectBaseMap, lblBaseMap, btnSelectTemplate, lblTemplate, btnRunTRN);
-        panel.getChildren().add(new Separator());
 
         // auto threshold button
         Button btnAutoThresh = styledButton("🪄 Auto Threshold (Otsu)", "#0277bd");
@@ -300,9 +239,10 @@ public class MainWindow extends Application {
         // save settings button
         Button btnSave = styledButton("💾 Save Settings", "#8957e5");
         btnSave.setMaxWidth(Double.MAX_VALUE);
-        btnSave.setOnAction(e -> saveSettings(pipeline.getEdgeDetector().getMode()));
+        btnSave.setOnAction(e -> saveSettings());
 
-        panel.getChildren().addAll(new Separator(), btnAutoThresh, btnReset, btnSave);
+        advancedVBox.getChildren().addAll(new Separator(), btnAutoThresh, btnReset, btnSave);
+        panel.getChildren().add(advancedVBox);
 
         ScrollPane sp = new ScrollPane(panel);
         sp.setFitToWidth(true);
@@ -329,9 +269,11 @@ public class MainWindow extends Application {
         grid.getRowConstraints().addAll(rc1, rc2);
 
         grid.add(imagePanel("Original",     ivOriginal),     0, 0);
-        grid.add(imagePanel("Preprocessed + K-Means Mask", ivPreprocessed), 1, 0);
+        grid.add(imagePanel("Preprocessed", ivPreprocessed), 1, 0);
         grid.add(imagePanel("Edge Detection",                  ivEdges),        0, 1);
         grid.add(imagePanel("Detected Craters",                ivDetected),     1, 1);
+
+        ivDetected.setOnMouseClicked(e -> handleCraterClick(e));
 
         return grid;
     }
@@ -449,6 +391,11 @@ public class MainWindow extends Application {
             statusLabel.setText("⚠ No image loaded.");
             return;
         }
+        
+        if (tbtnAdvanced != null && !tbtnAdvanced.isSelected()) {
+            applyAutoThreshold();
+        }
+        
         statusLabel.setText("⏳ Running pipeline...");
         statusLabel.setTextFill(Color.web("#e3b341"));
         
@@ -482,6 +429,7 @@ public class MainWindow extends Application {
             progressBar.setVisible(false);
             timerLabel.setVisible(false);
             PipelineResult r = task.getValue();
+            lastResult = r;
             setImageView(ivOriginal,     r.getMat(PipelineResult.Stage.ORIGINAL));
             setImageView(ivPreprocessed, r.getMat(PipelineResult.Stage.PREPROCESSED));
             setImageView(ivEdges,        r.getMat(PipelineResult.Stage.EDGES));
@@ -524,7 +472,6 @@ public class MainWindow extends Application {
         sGaussKernel.setValue(5); sGaussSigma.setValue(1.5);
         sCannyT1.setValue(50);    sCannyT2.setValue(150);
         sMorphCloseKernel.setValue(5); sMorphCloseIters.setValue(1);
-        cbKMeansEnabled.setSelected(true); sKMeansK.setValue(3); sKMeansIters.setValue(20);
         
         sLargeHoughMinDist.setValue(100); sLargeHoughParam1.setValue(100); sLargeHoughParam2.setValue(60);
         sLargeHoughMinR.setValue(80);     sLargeHoughMaxR.setValue(400);
@@ -536,27 +483,25 @@ public class MainWindow extends Application {
         sQuadrantRatio.setValue(3.0);
     }
 
-    private void saveSettings(EdgeDetector.Mode mode) {
+    private void saveSettings() {
         try {
-            String file = mode == EdgeDetector.Mode.CANNY ? "resources/CannyParams.json" : "resources/LoGParams.json";
+            String file = "resources/Params.json";
             String json = String.format("{\n" +
                 "  \"claheClipLimit\": %.2f,\n  \"claheTileSize\": %d,\n  \"topHatKernel\": %d,\n  \"morphKernel\": %d,\n  \"morphIters\": %d,\n  \"gaussKernel\": %d,\n  \"gaussSigma\": %.2f,\n" +
                 "  \"cannyT1\": %.2f,\n  \"cannyT2\": %.2f,\n" +
                 "  \"morphCloseKernel\": %d,\n  \"morphCloseIters\": %d,\n" +
-                "  \"kmeansEnabled\": %s,\n  \"kmeansK\": %d,\n  \"kmeansMaxIters\": %d,\n" +
                 "  \"largeHoughMinDist\": %.2f,\n  \"largeHoughParam1\": %.2f,\n  \"largeHoughParam2\": %.2f,\n  \"largeHoughMinR\": %d,\n  \"largeHoughMaxR\": %d,\n" +
                 "  \"smallHoughMinDist\": %.2f,\n  \"smallHoughParam1\": %.2f,\n  \"smallHoughParam2\": %.2f,\n  \"smallHoughMinR\": %d,\n  \"smallHoughMaxR\": %d,\n" +
                 "  \"minArcLength\": %.2f,\n  \"circularity\": %.2f,\n  \"quadrantRatio\": %.2f\n}", 
                 sClipLimit.getValue(), (int)sTileSize.getValue(), (int)sTopHatKernel.getValue(), (int)sMorphKernel.getValue(), (int)sMorphIters.getValue(), (int)sGaussKernel.getValue(), sGaussSigma.getValue(),
                 sCannyT1.getValue(), sCannyT2.getValue(), 
                 (int)sMorphCloseKernel.getValue(), (int)sMorphCloseIters.getValue(),
-                cbKMeansEnabled.isSelected(), (int)sKMeansK.getValue(), (int)sKMeansIters.getValue(),
                 sLargeHoughMinDist.getValue(), sLargeHoughParam1.getValue(), sLargeHoughParam2.getValue(), (int)sLargeHoughMinR.getValue(), (int)sLargeHoughMaxR.getValue(),
                 sSmallHoughMinDist.getValue(), sSmallHoughParam1.getValue(), sSmallHoughParam2.getValue(), (int)sSmallHoughMinR.getValue(), (int)sSmallHoughMaxR.getValue(),
                 sMinArcLength.getValue(), sCircularity.getValue(), sQuadrantRatio.getValue()
             );
             Files.writeString(new File(file).toPath(), json);
-            statusLabel.setText("✓ Saved " + mode + " settings.");
+            statusLabel.setText("✓ Saved settings.");
             statusLabel.setTextFill(Color.web("#3fb950"));
             logArea.appendText("Saved parameters to " + file + "\n");
         } catch(Exception e) {
@@ -566,9 +511,9 @@ public class MainWindow extends Application {
         }
     }
 
-    private void loadSettings(EdgeDetector.Mode mode) {
+    private void loadSettings() {
         try {
-            String file = mode == EdgeDetector.Mode.CANNY ? "resources/CannyParams.json" : "resources/LoGParams.json";
+            String file = "resources/Params.json";
             File jsonFile = new File(file);
             if (!jsonFile.exists()) return;
             
@@ -585,11 +530,6 @@ public class MainWindow extends Application {
             doubleVal(content, "cannyT2", sCannyT2::setValue);
             intVal(content, "morphCloseKernel", v -> sMorphCloseKernel.setValue(v));
             intVal(content, "morphCloseIters", v -> sMorphCloseIters.setValue(v));
-            
-            // K-Means params
-            boolVal(content, "kmeansEnabled", v -> cbKMeansEnabled.setSelected(v));
-            intVal(content, "kmeansK", v -> sKMeansK.setValue(v));
-            intVal(content, "kmeansMaxIters", v -> sKMeansIters.setValue(v));
             
             // New large params
             doubleVal(content, "largeHoughMinDist", sLargeHoughMinDist::setValue);
@@ -614,7 +554,7 @@ public class MainWindow extends Application {
             doubleVal(content, "circularity", sCircularity::setValue);
             doubleVal(content, "quadrantRatio", sQuadrantRatio::setValue);
 
-            statusLabel.setText("✓ Loaded " + mode + " settings.");
+            statusLabel.setText("✓ Loaded settings.");
             statusLabel.setTextFill(Color.web("#3fb950"));
             logArea.appendText("Loaded parameters from " + file + "\n");
         } catch (Exception ex) {
@@ -638,96 +578,6 @@ public class MainWindow extends Application {
         Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*(true|false)").matcher(content);
         if (m.find()) setter.accept(Boolean.parseBoolean(m.group(1)));
     }
-
-    // ------------------------------------------------------------------ Actions (TRN)
-
-    private File chooseImage(String title) {
-        FileChooser fc = new FileChooser();
-        fc.setTitle(title);
-        fc.getExtensionFilters().addAll(
-            new FileChooser.ExtensionFilter("Image Files", "*.png","*.jpg","*.jpeg","*.tif","*.tiff","*.bmp")
-        );
-        return fc.showOpenDialog(null);
-    }
-
-    private void runTRN(double scaleFactor) {
-        if (trnBaseMapPath == null || trnTemplatePath == null) {
-            statusLabel.setText("⚠ TRN: Please select both Base Map and Template.");
-            statusLabel.setTextFill(Color.web("#e3b341"));
-            return;
-        }
-        
-        statusLabel.setText("⏳ Running TRN Geometric Constellation Matching...");
-        statusLabel.setTextFill(Color.web("#e3b341"));
-        progressBar.setProgress(-1); // Indeterminate
-        progressBar.setVisible(true);
-        
-        Task<TRNDebugContext> task = new Task<>() {
-            @Override
-            protected TRNDebugContext call() throws Exception {
-                long t0 = System.currentTimeMillis();
-
-                // Load images
-                java.awt.image.BufferedImage mapImg = javax.imageio.ImageIO.read(new File(trnBaseMapPath));
-                java.awt.image.BufferedImage tempImg = javax.imageio.ImageIO.read(new File(trnTemplatePath));
-
-                // Prepare Debug Context
-                TRNDebugContext ctx = new TRNDebugContext();
-                ctx.mapImage = mapImg;
-                ctx.templateImage = tempImg;
-                ctx.expectedScale = scaleFactor;
-
-                // Execute Soft Edge ZNCC Matching
-                algorithms.TemplateMatcher.MatchResult matchRes = algorithms.TemplateMatcher.matchWithScaleSweep(
-                    mapImg, tempImg, scaleFactor, ctx);
-
-                ctx.executionTimeMs = System.currentTimeMillis() - t0;
-                
-                return ctx;
-            }
-        };
-
-        task.setOnSucceeded(e -> {
-            progressBar.setVisible(false);
-            progressBar.setProgress(0);
-            TRNDebugContext ctx = task.getValue();
-            algorithms.TemplateMatcher.MatchResult res = ctx.finalMatch;
-            
-            if (res != null) {
-                String info = String.format(" | Ölçek: %.3f | Skor: %.3f", res.optimalScale, res.score);
-                if (res.score >= 0.70) {
-                    statusLabel.setText(String.format("✓ Yüksek Doğrulukla Tespit Edildi (Skor: %.3f)%s", res.score, info));
-                    statusLabel.setTextFill(Color.web("#3fb950"));
-                } else if (res.score >= 0.50) {
-                    statusLabel.setText(String.format("⚠ Olası Eşleşme Bulundu (Skor: %.3f)%s", res.score, info));
-                    statusLabel.setTextFill(Color.web("#e3b341"));
-                } else {
-                    statusLabel.setText(String.format("✗ Düşük Güven (Skor: %.3f)%s", res.score, info));
-                    statusLabel.setTextFill(Color.web("#f85149"));
-                }
-                logArea.appendText(String.format("TRN ZNCC -> X:%d Y:%d (Score: %.3f, Scale: %.3f)\n",
-                    res.x, res.y, res.score, res.optimalScale));
-            } else {
-                statusLabel.setText("✗ Eşleşme Bulunamadı (ZNCC skoru çok düşük)");
-                statusLabel.setTextFill(Color.web("#f85149"));
-            }
-
-            // Show the new Engineering Diagnostic Panel
-            new TRNDiagnosticWindow(ctx).show();
-        });
-        
-        task.setOnFailed(e -> {
-            progressBar.setVisible(false);
-            progressBar.setProgress(0);
-            statusLabel.setText("✗ TRN Error: " + task.getException().getMessage());
-            statusLabel.setTextFill(Color.web("#f85149"));
-            task.getException().printStackTrace();
-        });
-        
-        new Thread(task, "trn-thread").start();
-    }
-    
-    // Old showTRNResult removed, using TRNDiagnosticWindow instead.
 
     // ------------------------------------------------------------------ Helpers
 
@@ -765,6 +615,98 @@ public class MainWindow extends Application {
 
     private void styleRadio(RadioButton rb) {
         rb.setStyle("-fx-text-fill: #c9d1d9; -fx-font-family: monospace; -fx-font-size: 12;");
+    }
+
+    private void handleCraterClick(javafx.scene.input.MouseEvent e) {
+        if (lastResult == null || lastResult.getMat(PipelineResult.Stage.ORIGINAL) == null) return;
+        
+        // Calculate image coordinates based on ImageView scale and letterboxing
+        double viewW = ivDetected.getBoundsInLocal().getWidth();
+        double viewH = ivDetected.getBoundsInLocal().getHeight();
+        
+        Mat orig = lastResult.getMat(PipelineResult.Stage.ORIGINAL);
+        double imgW = orig.width();
+        double imgH = orig.height();
+        
+        double scale = Math.min(viewW / imgW, viewH / imgH);
+        
+        double actualW = imgW * scale;
+        double actualH = imgH * scale;
+        
+        double offsetX = (viewW - actualW) / 2;
+        double offsetY = (viewH - actualH) / 2;
+        
+        double mouseX = e.getX();
+        double mouseY = e.getY();
+        
+        if (mouseX < offsetX || mouseX > offsetX + actualW ||
+            mouseY < offsetY || mouseY > offsetY + actualH) {
+            return;
+        }
+        
+        double imgX = (mouseX - offsetX) / scale;
+        double imgY = (mouseY - offsetY) / scale;
+        
+        // Find nearest crater
+        int[] nearest = null;
+        double minDist = Double.MAX_VALUE;
+        for (int[] c : lastResult.getCraters()) {
+            double dx = c[0] - imgX;
+            double dy = c[1] - imgY;
+            double dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < c[2] && dist < minDist) {
+                minDist = dist;
+                nearest = c;
+            }
+        }
+        
+        if (nearest != null) {
+            showCraterZoom(nearest);
+        }
+    }
+
+    private void showCraterZoom(int[] crater) {
+        Mat orig = lastResult.getMat(PipelineResult.Stage.ORIGINAL);
+        int cx = crater[0];
+        int cy = crater[1];
+        int r  = crater[2];
+        
+        int boxSize = r * 4;
+        int x1 = Math.max(0, cx - boxSize / 2);
+        int y1 = Math.max(0, cy - boxSize / 2);
+        int x2 = Math.min(orig.cols(), cx + boxSize / 2);
+        int y2 = Math.min(orig.rows(), cy + boxSize / 2);
+        
+        Rect roi = new Rect(x1, y1, x2 - x1, y2 - y1);
+        Mat cropped = new Mat(orig, roi);
+        
+        Mat resized = new Mat();
+        org.opencv.imgproc.Imgproc.resize(cropped, resized, new Size(256, 256), 0, 0, org.opencv.imgproc.Imgproc.INTER_CUBIC);
+        
+        // Draw crater circle on the cropped image
+        org.opencv.imgproc.Imgproc.circle(resized, new Point(256/2.0, 256/2.0), (int)((r * 256.0) / boxSize), new Scalar(0, 255, 0), 2);
+        
+        Image img = MatToImage.toFXImage(resized);
+        ImageView iv = new ImageView(img);
+        iv.setFitWidth(256); iv.setFitHeight(256);
+        
+        VBox root = new VBox(10);
+        root.setPadding(new Insets(10));
+        root.setStyle("-fx-background-color: #0d1117;");
+        root.setAlignment(Pos.CENTER);
+        
+        Label info = new Label(String.format("Center: (%d, %d)\nRadius: %d", cx, cy, r));
+        info.setFont(Font.font("Monospaced", 14));
+        info.setTextFill(Color.web("#e6edf3"));
+        
+        root.getChildren().addAll(iv, info);
+        
+        Stage stage = new Stage();
+        stage.setTitle("Crater Details");
+        stage.setScene(new Scene(root));
+        stage.show();
+        
+        resized.release();
     }
 
     // Generic slider factory (double)

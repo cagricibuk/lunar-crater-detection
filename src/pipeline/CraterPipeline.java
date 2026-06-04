@@ -1,7 +1,6 @@
 package pipeline;
 
 import algorithms.Preprocessor;
-import algorithms.KMeansSegmenter;
 import algorithms.EdgeDetector;
 import algorithms.EllipseDetector;
 import algorithms.HoughDetector;
@@ -18,7 +17,6 @@ import java.util.List;
  * Pipeline order:
  *   1. Load image
  *   2. Preprocessor      → CLAHE + Top-Hat + Morph Gradient + Gaussian
- *   2b. KMeansSegmenter  → K=3 topographic masking (shadow isolation)
  *   3. EdgeDetector      → Canny or LoG
  *   4. HoughDetector     → Circular Hough Transform
  *   5. RegionFilter      → circularity validation
@@ -27,7 +25,6 @@ import java.util.List;
 public class CraterPipeline {
 
     private final Preprocessor    preprocessor    = new Preprocessor();
-    private final KMeansSegmenter kmeansSegmenter = new KMeansSegmenter();
     private final EdgeDetector    edgeDetector    = new EdgeDetector();
     private final HoughDetector   largeHoughDetector = new HoughDetector();
     private final HoughDetector   smallHoughDetector = new HoughDetector();
@@ -82,31 +79,19 @@ public class CraterPipeline {
             ", Morph=" + preprocessor.getMorphKernel() + "x" + preprocessor.getMorphIterations() +
             ", Gaussian=" + preprocessor.getGaussKernel() + ")");
 
-        // 2b. K-Means Segmentation — topographic shadow isolation
-        Mat mask = kmeansSegmenter.segment(preprocessed);
-        Mat masked = Mat.zeros(preprocessed.size(), preprocessed.type());
-        preprocessed.copyTo(masked, mask);   // keep only shadow-region intensities
-        if (progressCallback != null) progressCallback.accept(0.25);
+        result.setMat(PipelineResult.Stage.PREPROCESSED, toDisplayable(preprocessed));
 
-        if (kmeansSegmenter.isEnabled()) {
-            result.appendLog("K-Means segmentation: " + kmeansSegmenter.getLastSummary());
-        } else {
-            result.appendLog("K-Means segmentation: DISABLED (pass-through)");
-        }
-        result.setMat(PipelineResult.Stage.PREPROCESSED, toDisplayable(masked));
-
-        // 3. Edge detection (operates on shadow-masked image)
-        Mat edges = edgeDetector.detect(masked);
+        // 3. Edge detection (operates on preprocessed image)
+        Mat edges = edgeDetector.detect(preprocessed);
         if (progressCallback != null) progressCallback.accept(0.4);
         result.setMat(PipelineResult.Stage.EDGES, toDisplayable(edges));
-        result.appendLog("Edge detection: " + edgeDetector.getMode() +
+        result.appendLog("Edge detection: Canny" +
             " (t1=" + edgeDetector.getThreshold1() +
             ", t2=" + edgeDetector.getThreshold2() + ")");
 
         // 4. Hough circles (large and small scale)
-        // Pass 'masked' (grayscale) instead of 'edges' so internal Canny can work properly with param1
-        List<int[]> largeCircles = largeHoughDetector.detect(masked);
-        List<int[]> smallCircles = smallHoughDetector.detect(masked);
+        List<int[]> largeCircles = largeHoughDetector.detect(preprocessed);
+        List<int[]> smallCircles = smallHoughDetector.detect(preprocessed);
         
         List<int[]> houghCircles = new java.util.ArrayList<>(largeCircles);
         houghCircles.addAll(smallCircles);
@@ -178,8 +163,6 @@ public class CraterPipeline {
 
         // release intermediates
         preprocessed.release();
-        mask.release();
-        masked.release();
         edges.release();
 
         return result;
@@ -197,7 +180,6 @@ public class CraterPipeline {
 
     // --- expose algorithm objects so GUI can bind sliders ---
     public Preprocessor    getPreprocessor()      { return preprocessor; }
-    public KMeansSegmenter getKmeansSegmenter()   { return kmeansSegmenter; }
     public EdgeDetector    getEdgeDetector()      { return edgeDetector; }
     public HoughDetector   getLargeHoughDetector() { return largeHoughDetector; }
     public HoughDetector   getSmallHoughDetector() { return smallHoughDetector; }
