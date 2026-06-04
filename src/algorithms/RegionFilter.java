@@ -13,14 +13,12 @@ import java.util.List;
  * to reject false positives:
  *   - Circularity score of the edge mask within the circle
  *   - Quadrant symmetry: edge distribution across 4 quadrants
- *   - Minimum / maximum area (π·r²)
  *
  * Reference: Region properties — Week 4, COMP4687 syllabus.
  */
 public class RegionFilter {
 
     private double minCircularity   = 0.15;  // 0..1, 1 = perfect circle
-    private double minAreaRatio     = 0.1;   // min fraction of circle area covered by edges
     private int    minRadius        = 8;
     private int    maxRadius        = 200;
     private double maxQuadrantRatio = 3.0;   // max imbalance between opposing quadrant halves
@@ -175,14 +173,12 @@ public class RegionFilter {
 
     // --- setters ---
     public void setMinCircularity(double v)   { this.minCircularity   = v; }
-    public void setMinAreaRatio(double v)      { this.minAreaRatio     = v; }
     public void setMinRadius(int v)            { this.minRadius        = v; }
     public void setMaxRadius(int v)            { this.maxRadius        = v; }
     public void setMaxQuadrantRatio(double v)  { this.maxQuadrantRatio = Math.max(1.1, v); }
 
     // --- getters ---
     public double getMinCircularity()   { return minCircularity; }
-    public double getMinAreaRatio()     { return minAreaRatio; }
     public int    getMinRadius()        { return minRadius; }
     public int    getMaxRadius()        { return maxRadius; }
     public double getMaxQuadrantRatio() { return maxQuadrantRatio; }

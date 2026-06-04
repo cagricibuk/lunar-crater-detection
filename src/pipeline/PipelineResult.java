@@ -16,7 +16,7 @@ public class PipelineResult {
         DETECTED
     }
 
-    // Detected craters: each int[] = {centerX, centerY, radius}
+    // Detected craters: each int[] = {cx, cy, a (semi-axis), b (semi-axis), angle}
     private List<int[]> craters = new ArrayList<>();
 
     // Intermediate images for each stage (for side-by-side display)

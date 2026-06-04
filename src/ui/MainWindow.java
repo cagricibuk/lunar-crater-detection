@@ -4,7 +4,6 @@ import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.geometry.Insets;
-import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
@@ -545,11 +544,6 @@ public class MainWindow extends Application {
             intVal(content, "smallHoughMinR", v -> sSmallHoughMinR.setValue(v));
             intVal(content, "smallHoughMaxR", v -> sSmallHoughMaxR.setValue(v));
 
-            // Legacy backward compatibility
-            doubleVal(content, "houghMinDist", sLargeHoughMinDist::setValue);
-            doubleVal(content, "houghParam2", sLargeHoughParam2::setValue);
-            intVal(content, "houghMinR", v -> sLargeHoughMinR.setValue(v));
-            intVal(content, "houghMaxR", v -> sLargeHoughMaxR.setValue(v));
             doubleVal(content, "minArcLength", sMinArcLength::setValue);
             doubleVal(content, "circularity", sCircularity::setValue);
             doubleVal(content, "quadrantRatio", sQuadrantRatio::setValue);
@@ -572,11 +566,6 @@ public class MainWindow extends Application {
     private void intVal(String content, String key, java.util.function.IntConsumer setter) {
         Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*([0-9.]+)").matcher(content);
         if (m.find()) setter.accept((int)Double.parseDouble(m.group(1)));
-    }
-
-    private void boolVal(String content, String key, java.util.function.Consumer<Boolean> setter) {
-        Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*(true|false)").matcher(content);
-        if (m.find()) setter.accept(Boolean.parseBoolean(m.group(1)));
     }
 
     // ------------------------------------------------------------------ Helpers
@@ -611,10 +600,6 @@ public class MainWindow extends Application {
         b.setStyle("-fx-background-color: " + bg + "; -fx-text-fill: #e6edf3; " +
             "-fx-font-family: monospace; -fx-cursor: hand; -fx-border-radius: 4; -fx-background-radius: 4;");
         return b;
-    }
-
-    private void styleRadio(RadioButton rb) {
-        rb.setStyle("-fx-text-fill: #c9d1d9; -fx-font-family: monospace; -fx-font-size: 12;");
     }
 
     private void handleCraterClick(javafx.scene.input.MouseEvent e) {

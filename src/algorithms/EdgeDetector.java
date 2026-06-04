@@ -6,9 +6,11 @@ import org.opencv.imgproc.Imgproc;
 /**
  * Step 2 of pipeline: Edge detection.
  *
- * Modes (selectable from GUI):
- *   CANNY — Canny edge detector          (Week 7-8, syllabus)
- *   LOG   — Laplacian of Gaussian        (Week 7,   syllabus)
+ * Applies Canny edge detector followed by morphological closing
+ * to connect broken crater rim edges.
+ *
+ * Reference: Canny edge detector — Week 7-8, COMP4687 syllabus.
+ *            Morphological closing — Week 3, COMP4687 syllabus.
  */
 public class EdgeDetector {
 
@@ -44,7 +46,7 @@ public class EdgeDetector {
         return closedEdges;
     }
 
-    public Mat detectCanny(Mat gray) {
+    private Mat detectCanny(Mat gray) {
         Mat edges = new Mat();
         Imgproc.Canny(gray, edges, threshold1, threshold2, apertureSize, false);
         return edges;

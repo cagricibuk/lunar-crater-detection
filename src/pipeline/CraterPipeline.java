@@ -17,10 +17,13 @@ import java.util.List;
  * Pipeline order:
  *   1. Load image
  *   2. Preprocessor      → CLAHE + Top-Hat + Morph Gradient + Gaussian
- *   3. EdgeDetector      → Canny or LoG
- *   4. HoughDetector     → Circular Hough Transform
- *   5. RegionFilter      → circularity validation
- *   6. Draw overlay      → result Mat
+ *   3. EdgeDetector      → Canny + Morphological Closing
+ *   4a. HoughDetector (large)  → Circular Hough Transform, large scale
+ *   4b. HoughDetector (small)  → Circular Hough Transform, small scale
+ *   4c. EllipseDetector  → contour-based ellipse fitting
+ *   5. Merge & deduplicate candidates
+ *   6. RegionFilter      → circularity + quadrant symmetry validation
+ *   7. Draw overlay      → result Mat
  */
 public class CraterPipeline {
 
